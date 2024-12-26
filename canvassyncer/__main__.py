@@ -104,30 +104,39 @@ class AsyncSemClient:
         await self.client.aclose()
 
 
+# class File:
+#     def __init__(self, name="", path="", url="", size=0, modifiedTimeStamp=0):
+#         self.name = name
+#         self.path = path
+#         self.url = url
+#         self.size = size  # in bytes
+#         self.modifiedTimeStamp = modifiedTimeStamp
+
+
 class CanvasSyncer:
-
-    class Files:
-        def __init__(self):
-            self.name = ""
-            self.url = ""
-            self.destination = ""
-            self.size = 0
-
     def __init__(self, config):
         self.config = config
         self.client = AsyncSemClient(
             config["connection_count"], config["token"], config.get("proxy")
         )
-        self.downloadSize = 0
-        self.laterDownloadSize = 0
         self.courseCode = {}
         self.baseUrl = self.config["canvasURL"] + "/api/v1"
         self.downloadDir = self.config["downloadDir"]
-        self.newInfo = []
-        self.newFiles = []
-        self.laterFiles = []
-        self.laterInfo = []
-        self.skipfiles = []
+
+        self.folders = {}
+
+        # FILE DICTIONARY: 2-stage dict 
+        # {courseID:{relative_file_path (to course root):{"name":<str, "url":<str, size:<int>, modified_date:<int>}}}
+        self.localFiles = {}
+        self.onlineFiles = {}
+        self.laterFiles = {}
+        self.newFiles = {}
+        self.skipFiles = {}  # a list of files with unwanted categories
+        self.overSizedFiles = {}
+        self.downloadList = {}
+        self.downloadSize = 0
+        # self.newInfo = []
+        # self.laterInfo = []
         self.totalFileCount = 0
         if not os.path.exists(self.downloadDir):
             os.mkdir(self.downloadDir)
@@ -150,8 +159,8 @@ class CanvasSyncer:
             page += PAGES_PER_TIME
         return res
 
-    def prepareLocalFiles(self, courseID, folders):
-        localFiles = []
+    def scanLocalFiles(self, courseID, folders):
+        localFiles = {}
         for folder in folders.values():
             if self.config["no_subfolder"]:
                 path = os.path.join(self.downloadDir, folder[1:])
@@ -161,11 +170,32 @@ class CanvasSyncer:
                 )
             if not os.path.exists(path):
                 os.makedirs(path)
-            localFiles += [
-                os.path.join(folder, f).replace("\\", "/").replace("//", "/")
-                for f in os.listdir(path)
-                if not os.path.isdir(os.path.join(path, f))
-            ]
+
+            for f in os.listdir(path):
+                if not os.path.isdir(os.path.join(path, f)):
+                    full_file_path = (
+                        os.path.join(path, f).replace("\\", "/").replace("//", "/")
+                    )
+                    relative_file_path = (
+                        os.path.join(folder, f).replace("\\", "/").replace("//", "/")
+                    )
+                    # localFiles[file_path] = {"name":f, "size":os.path.getsize(path), "modified_time":int(os.path.getctime(path))}
+                    localFiles[relative_file_path] = {
+                        "name": f,
+                        "size": os.path.getsize(full_file_path),
+                        "modified_time": int(os.path.getctime(full_file_path)),
+                    }
+
+            # localFiles += [
+            #     File(path, f)
+            #     for f in os.listdir(path)
+            #     if not os.path.isdir(os.path.join(path, f))
+            # ]
+            # localFiles += [
+            #     os.path.join(folder, f).replace("\\", "/").replace("//", "/")
+            #     for f in os.listdir(path)
+            #     if not os.path.isdir(os.path.join(path, f))
+            # ]
         return localFiles
 
     async def getCourseFoldersWithIDHelper(self, page, courseID):
@@ -203,14 +233,24 @@ class CanvasSyncer:
             path = f"{folders[f['folder_id']]}/{f['display_name']}"
             path = path.replace("\\", "/").replace("//", "/")
             dt = datetime.strptime(f["modified_at"], "%Y-%m-%dT%H:%M:%SZ")
-            modifiedTimeStamp = dt.replace(tzinfo=timezone.utc).timestamp()
-            files[path] = (f["url"], int(modifiedTimeStamp))
+            modifiedTimeStamp = int(dt.replace(tzinfo=timezone.utc).timestamp())
+            response = await self.client.head(f["url"])
+            file_size = int(response.get("content-length", 0))
+            files[path] = {
+                "url": f["url"],
+                "modified_time": int(modifiedTimeStamp),
+                "size": file_size,
+            }
         return files
 
     async def getCourseFiles(self, courseID):
-        folders = await self.dictFromPages(self.getCourseFoldersWithIDHelper, courseID)
-        files = await self.dictFromPages(self.getCourseFilesHelper, courseID, folders)
-        return folders, files
+        self.folders[courseID] = await self.dictFromPages(
+            self.getCourseFoldersWithIDHelper, courseID
+        )  # a dict of folders, key is the folder id, value is the folder name relative to the root folder
+        self.onlineFiles[courseID] = await self.dictFromPages(
+            self.getCourseFilesHelper, courseID, self.folders[courseID]
+        )  # a dict of files, key is the file path, value is a tuple of file url, modified timestamp and file size
+        # return folders, files
 
     async def getCourseIdByCourseCodeHelper(self, page, lowerCourseCodes):
         res = {}
@@ -270,6 +310,8 @@ class CanvasSyncer:
             coros.append(self.getCourseCodeByCourseID())
         await asyncio.gather(*coros)
 
+    # TODO 实现下述效果
+    # Get online files (perform size filter) and categorize them into new files and later files
     async def getCourseTaskInfoHelper(
         self, courseID, localFiles, fileName, fileUrl, fileModifiedTimeStamp
     ):
@@ -287,8 +329,7 @@ class CanvasSyncer:
         response = await self.client.head(fileUrl)
         fileSize = int(response.get("content-length", 0))
         if fileName in localFiles:
-            self.laterDownloadSize += fileSize
-            self.laterFiles.append((fileUrl, path))
+            # self.laterFiles[]
             self.laterInfo.append(
                 f"{self.courseCode[courseID]}{fileName} ({round(fileSize / 1000000, 2)}MB)"
             )
@@ -297,9 +338,9 @@ class CanvasSyncer:
             # aiofiles.open(path, "w").close()
             # async with aiofiles.open(path, "w") as f:
             # pass
-            self.skipfiles.append(
-                f"{self.courseCode[courseID]}{fileName} ({round(fileSize / 1000000, 2)}MB)"
-            )
+            # self.skipFiles[]
+            # f"{self.courseCode[courseID]}{fileName} ({round(fileSize / 1000000, 2)}MB)"
+
             return
         self.newInfo.append(
             f"{self.courseCode[courseID]}{fileName} ({round(fileSize / 1000000, 2)}MB)"
@@ -307,10 +348,11 @@ class CanvasSyncer:
         self.downloadSize += fileSize
         self.newFiles.append((fileUrl, path))
 
-    async def getCourseTaskInfo(self, courseID):
-        folders, files = await self.getCourseFiles(courseID)
-        self.totalFileCount += len(files)
-        localFiles = self.prepareLocalFiles(courseID, folders)
+    async def getCourseTaskInfo(self, courseID, files, localFiles):
+        # self.totalFileCount += len(files)
+        # localFiles = self.scanLocalFiles(
+        #     courseID, folders
+        # )  # a dict of local files, key is the relative path, value is a tuple of file name, file size and modified timestamp
         await asyncio.gather(
             *[
                 self.getCourseTaskInfoHelper(
@@ -321,12 +363,12 @@ class CanvasSyncer:
         )
 
     def checkNewFiles(self):
-        if self.skipfiles:
+        if self.skipFiles:
             print(
                 "These file(s) will not be synced due to their size"
                 + f" (over {self.config['filesizeThresh']} MB):"
             )
-            for f in self.skipfiles:
+            for f in self.skipFiles:
                 print(f)
         if self.newFiles:
             print(f"Start to download {len(self.newInfo)} file(s)!")
@@ -401,6 +443,36 @@ class CanvasSyncer:
             if self.checkAllowDownload(path)
         ]
 
+    def countFiles(self, filesDict):
+        count = 0
+        for courseID in filesDict.keys():
+            count += len(filesDict[courseID])
+        return count
+  
+
+    def checkFileSize(self):
+        for courseID in self.courseCode.keys():
+            if courseID not in self.overSizedFiles:
+                self.overSizedFiles[courseID] = {}
+            # 创建字典项的副本
+            items = list(self.onlineFiles[courseID].items())
+            for file_name, file_info in items:
+                if file_info["size"] > self.config["filesizeThresh"] * 1024 * 1024:
+                    self.overSizedFiles[courseID][file_name] = file_info
+                    self.onlineFiles[courseID].pop(file_name)
+        # return self.onlineFiles
+        # tmp = self.onlineFiles
+        # for courseID in self.courseCode.keys():
+        #     if courseID not in self.overSizedFiles.keys():
+        #         self.overSizedFiles[courseID] = {}
+        #     for file_name, file_info in self.onlineFiles[courseID].items():
+        #         if file_info["size"] > self.config["filesizeThresh"] * 1024 * 1024:
+        #             self.overSizedFiles[courseID].update({file_name: file_info})
+        #             tmp[courseID].pop(file_name)
+        # return tmp
+        # # self.onlineFiles = tmp
+                
+
     async def sync(self):
         # Get course IDs
         times = 0
@@ -416,14 +488,49 @@ class CanvasSyncer:
                 print(f"Number of available courses doesn't match, retrying...")
             times += 1
         print(f"Get {len(self.courseCode)} available courses!\n")
-        print("Finding files on canvas...")
+
         # TODO 更改逻辑
+
+        # Get files
+        print("Finding files on canvas...")
+        # Get online files and folders
         await asyncio.gather(
             *[
-                asyncio.create_task(self.getCourseTaskInfo(courseID))
+                asyncio.create_task(self.getCourseFiles(courseID))
                 for courseID in self.courseCode.keys()
             ]
         )
+        # Get offline files
+        for courseID in self.courseCode.keys():
+            self.localFiles[courseID] = self.scanLocalFiles(
+                courseID, self.folders[courseID]
+            )
+
+        print(f"Found {self.countFiles(self.onlineFiles)} files on canvas!")
+
+        # Check file size
+        self.checkFileSize()
+
+        # TODO 加上去掉特定类型文件的逻辑
+
+        # TODO 加上onlineFiles分类为newFiles和laterFiles的逻辑
+
+        # TODO 加上是否要更新laterFiles的逻辑， 以及是否要overwrite的逻辑
+
+        # FIX 之前错误的下载大小计算
+
+        return
+        # await asyncio.gather(
+        #     *[
+        #         asyncio.create_task(
+                    # self.getCourseTaskInfo(courseID, self.onlineFiles, self.localFiles)
+        #         )
+        #         for courseID in self.courseCode.keys()
+        #     ]
+        # )
+
+
+
         print(f"Get {self.totalFileCount} files!")
         if not self.newFiles and not self.laterFiles:
             return print("All local files are synced!")
