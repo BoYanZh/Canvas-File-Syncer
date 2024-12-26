@@ -73,7 +73,18 @@ class AsyncSemClient:
             try:
                 async with self.sem:
                     resp = await self.client.get(*args, **kwargs)
-                res = resp.json()
+                text =  resp.text
+                if resp.status_code == 403 and "Rate Limit Exceeded" in text:
+                    print("Rate limit exceeded. Waiting 15s before retrying...")
+                    await asyncio.sleep(15)  # 等待 60 秒后重试
+                    retryTimes += 1
+                    continue
+                try:
+                    res = resp.json()
+                except json.JSONDecodeError as e:
+                    print(f"JSONDecodeError: {e}")
+                    print(f"Response text: {text}")
+                    raise e
                 if checkError and isinstance(res, dict) and res.get("errors"):
                     errMsg = res["errors"][0].get("message", "unknown error.")
                     print(f"\nError: {errMsg}")
@@ -208,7 +219,10 @@ class CanvasSyncer:
         return res
 
     async def getCourseIdByCourseCode(self):
-        lowerCourseCodes = [s.lower() for s in self.config["courseCodes"]]
+        lowerCourseCodes = []
+        for courseCode in self.config["courseCodes"]:
+            lowerCourseCodes.append(courseCode.replace(" ", "").lower())
+        # lowerCourseCodes = [s.lower() for s in self.config["courseCodes"]]
         self.courseCode = await self.dictFromPages(
             self.getCourseIdByCourseCodeHelper, lowerCourseCodes
         )
@@ -260,7 +274,9 @@ class CanvasSyncer:
             )
             return
         if fileSize > self.config["filesizeThresh"] * 1000000:
-            aiofiles.open(path, "w").close()
+            # aiofiles.open(path, "w").close()
+            # async with aiofiles.open(path, "w") as f:
+                # pass
             self.skipfiles.append(
                 f"{self.courseCode[courseID]}{fileName} ({round(fileSize / 1000000, 2)}MB)"
             )
