@@ -73,10 +73,10 @@ class AsyncSemClient:
             try:
                 async with self.sem:
                     resp = await self.client.get(*args, **kwargs)
-                text =  resp.text
+                text = resp.text
                 if resp.status_code == 403 and "Rate Limit Exceeded" in text:
-                    print("Rate limit exceeded. Waiting 15s before retrying...")
-                    await asyncio.sleep(15)  # 等待 60 秒后重试
+                    print("Rate limit exceeded. Waiting 5s before retrying...")
+                    await asyncio.sleep(5)  # 等待 5 秒后重试
                     retryTimes += 1
                     continue
                 try:
@@ -105,6 +105,14 @@ class AsyncSemClient:
 
 
 class CanvasSyncer:
+
+    class Files:
+        def __init__(self):
+            self.name = ""
+            self.url = ""
+            self.destination = ""
+            self.size = 0
+
     def __init__(self, config):
         self.config = config
         self.client = AsyncSemClient(
@@ -216,6 +224,11 @@ class CanvasSyncer:
             if course.get("course_code", "").lower() in lowerCourseCodes:
                 res[course["id"]] = course["course_code"]
                 lowerCourseCodes.remove(course.get("course_code", "").lower())
+                print(
+                    f"\t Get course ID: {course['id']} from course code: {course['course_code']}"
+                )
+            # else:
+            # print(f"\t Discard course code: {course['course_code']}")
         return res
 
     async def getCourseIdByCourseCode(self):
@@ -223,16 +236,23 @@ class CanvasSyncer:
         for courseCode in self.config["courseCodes"]:
             lowerCourseCodes.append(courseCode.replace(" ", "").lower())
         # lowerCourseCodes = [s.lower() for s in self.config["courseCodes"]]
-        self.courseCode = await self.dictFromPages(
-            self.getCourseIdByCourseCodeHelper, lowerCourseCodes
+        self.courseCode.update(
+            await self.dictFromPages(
+                self.getCourseIdByCourseCodeHelper, lowerCourseCodes
+            )
         )
 
     async def getCourseCodeByCourseIDHelper(self, courseID):
         url = f"{self.baseUrl}/courses/{courseID}"
         clientRes = await self.client.json(url, debug=self.config["debug"])
         if clientRes.get("course_code") is None:
+            print(f"\t Cannot get course code from course ID: {courseID}")
             return
-        self.courseCode[courseID] = clientRes["course_code"]
+        # self.courseCode[(courseID)] = clientRes["course_code"]
+        self.courseCode[int(courseID)] = clientRes["course_code"]
+        print(
+            f"\t Get course code: {clientRes['course_code']} from course ID: {courseID}"
+        )
 
     async def getCourseCodeByCourseID(self):
         await asyncio.gather(
@@ -276,7 +296,7 @@ class CanvasSyncer:
         if fileSize > self.config["filesizeThresh"] * 1000000:
             # aiofiles.open(path, "w").close()
             # async with aiofiles.open(path, "w") as f:
-                # pass
+            # pass
             self.skipfiles.append(
                 f"{self.courseCode[courseID]}{fileName} ({round(fileSize / 1000000, 2)}MB)"
             )
@@ -319,7 +339,7 @@ class CanvasSyncer:
         print("These file(s) have later version on canvas:")
         for s in self.laterInfo:
             print(s)
-        isDownload = "Y" if self.config["y"] else input("Update all?(Y/n) ")
+        isDownload = "Y" if self.config["y"] else input("Update all?(y/n) ")
         if isDownload in ["n", "N"]:
             return
         print(f"Start to download {len(self.laterInfo)} file(s)!")
@@ -382,10 +402,22 @@ class CanvasSyncer:
         ]
 
     async def sync(self):
+        # Get course IDs
+        times = 0
+        total_course_number = len(self.config.get("courseCodes", [])) + len(
+            self.config.get("courseIDs", [])
+        )
         print("Getting course IDs...")
-        await self.getCourseID()
-        print(f"Get {len(self.courseCode)} available courses!")
+        while times < 5:
+            await self.getCourseID()
+            if len(self.courseCode) == total_course_number:
+                break
+            else:
+                print(f"Number of available courses doesn't match, retrying...")
+            times += 1
+        print(f"Get {len(self.courseCode)} available courses!\n")
         print("Finding files on canvas...")
+        # TODO 更改逻辑
         await asyncio.gather(
             *[
                 asyncio.create_task(self.getCourseTaskInfo(courseID))
@@ -502,7 +534,7 @@ def getConfig():
         "-c",
         "--connection",
         help="max connection count with server",
-        default=16,
+        default=8,
         type=int,
     )
     parser.add_argument("-x", "--proxy", help="download proxy", default=None)
@@ -536,7 +568,6 @@ def getConfig():
     config["proxy"] = args.proxy
     config["no_subfolder"] = args.no_subfolder
     config["connection_count"] = args.connection
-    config["no_keep_older_version"] = args.no_keep_older_version
     config["debug"] = args.debug
     if not "allowAudio" in config:
         config["allowAudio"] = True
@@ -544,6 +575,8 @@ def getConfig():
         config["allowVideo"] = True
     if not "allowImage" in config:
         config["allowImage"] = True
+    if not "keepOlderVersion" in config:
+        config["no_keep_older_version"] = args.no_keep_older_version
 
     return config
 
