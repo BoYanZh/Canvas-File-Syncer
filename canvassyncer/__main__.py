@@ -6,6 +6,10 @@ import platform
 import traceback
 
 import httpx
+import aiofiles
+import tqdm
+
+import httpx
 from CanvasSyncer import CanvasSyncer
 
 __version__ = "2.0.12"

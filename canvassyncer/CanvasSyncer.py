@@ -209,7 +209,7 @@ class CanvasSyncer:
                 print(s)
 
     def checkLaterFiles(self):
-        for courseID in self.laterFiles.keys():
+        for courseID in self.laterFiles:
             if self.laterFiles[courseID]:
                 break
             else:
@@ -318,7 +318,7 @@ class CanvasSyncer:
                 self.downloadList[courseID] = {}
             self.downloadList[courseID].update(self.newFiles[courseID])
             self.downloadList[courseID].update(self.laterFiles[courseID])
-        for courseID in self.downloadList.keys():
+        for courseID in self.downloadList:
             for file_info in self.downloadList[courseID].values():
                 self.downloadSize += file_info["size"]
 
