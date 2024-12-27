@@ -217,7 +217,7 @@ class CanvasSyncer:
         # if not self.laterFiles:
         #     return
         print("\nThese file(s) have later version on canvas:")
-        for courseID in self.laterFiles.keys():
+        for courseID in self.laterFiles:
             for fileName, file_info in self.laterFiles[courseID].items():
                 print(
                     f"\t{self.courseCode[courseID]}{fileName} (Modified at: {datetime.fromtimestamp(file_info['modified_time']).strftime('%Y-%m-%d %H:%M:%S')})"
