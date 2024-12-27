@@ -55,7 +55,7 @@ class CanvasSyncer:
 
     def countFiles(self, filesDict):
         count = 0
-        for courseID in filesDict.keys():
+        for courseID in filesDict:
             count += len(filesDict[courseID])
         return count
 
@@ -179,7 +179,7 @@ class CanvasSyncer:
         if not canvasFiles or isinstance(canvasFiles, dict):
             return files
         for f in canvasFiles:
-            if f["folder_id"] not in folders.keys():
+            if f["folder_id"] not in folders:
                 continue
             f["display_name"] = re.sub(r"[\/\\\:\*\?\"\<\>\|]", "_", f["display_name"])
             path = f"{folders[f['folder_id']]}/{f['display_name']}"
@@ -228,7 +228,7 @@ class CanvasSyncer:
         if isDownload.lower() == "n":
             return
         # Remove local files with older version
-        for courseID in self.laterFiles.keys():
+        for courseID in self.laterFiles:
             for fileName, file_info in self.laterFiles[courseID].items():
                 abs_file_path = (
                     os.path.join(
