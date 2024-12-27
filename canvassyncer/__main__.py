@@ -6,16 +6,14 @@ import platform
 import traceback
 
 import httpx
-import CanvasSyncer
+from CanvasSyncer import CanvasSyncer
 
 __version__ = "2.0.12"
+
+
 CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), ".canvassyncer.json"
 )
-PAGES_PER_TIME = 8
-
-
-
 
 def initConfig():
     oldConfig = {}

@@ -4,7 +4,11 @@ import os
 import re
 from datetime import datetime, timezone
 
-import AsyncSemClient
+from AsyncSemClient import AsyncSemClient
+
+
+PAGES_PER_TIME = 8
+
 
 class CanvasSyncer:
     def __init__(self, config):
