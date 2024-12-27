@@ -257,9 +257,9 @@ class CanvasSyncer:
                     print(f"\t [{e.__class__.__name__}] Skipped: {abs_file_path}")
 
     def checkFileType(self):
-        for courseID in self.courseCode.keys():
+        for courseID in self.courseCode:
             items = list(self.onlineFiles[courseID].items())
-            for file_name, file_info in items:
+            for file_name, _ in items:
                 if not self.checkFileTypeHelper(courseID, file_name):
                     self.onlineFiles[courseID].pop(file_name)
 
@@ -282,7 +282,7 @@ class CanvasSyncer:
         return True
 
     def categorizeFiles(self):
-        for courseID in self.courseCode.keys():
+        for courseID in self.courseCode:
             if courseID not in self.laterFiles:
                 self.laterFiles[courseID] = {}
             if courseID not in self.newFiles:
@@ -303,7 +303,7 @@ class CanvasSyncer:
                     self.newFiles[courseID][file_name] = file_info
 
     def checkFileSize(self):
-        for courseID in self.courseCode.keys():
+        for courseID in self.courseCode:
             if courseID not in self.overSizedFiles:
                 self.overSizedFiles[courseID] = {}
             items = list(self.onlineFiles[courseID].items())
@@ -313,13 +313,13 @@ class CanvasSyncer:
                     self.onlineFiles[courseID].pop(file_name)
 
     def prepareDownload(self):
-        for courseID in self.newFiles.keys():
+        for courseID in self.newFiles:
             if courseID not in self.downloadList:
                 self.downloadList[courseID] = {}
             self.downloadList[courseID].update(self.newFiles[courseID])
             self.downloadList[courseID].update(self.laterFiles[courseID])
         for courseID in self.downloadList.keys():
-            for file_name, file_info in self.downloadList[courseID].items():
+            for file_info in self.downloadList[courseID].values():
                 self.downloadSize += file_info["size"]
 
     async def sync(self):
@@ -334,7 +334,7 @@ class CanvasSyncer:
             if len(self.courseCode) == total_course_number:
                 break
             else:
-                print(f"Number of available courses doesn't match, retrying...")
+                print("Number of available courses doesn't match, retrying...")
             times += 1
         print(f"Get {len(self.courseCode)} available courses.\n")
 
@@ -344,11 +344,11 @@ class CanvasSyncer:
         await asyncio.gather(
             *[
                 asyncio.create_task(self.getCourseFiles(courseID))
-                for courseID in self.courseCode.keys()
+                for courseID in self.courseCode
             ]
         )
         # Get offline files
-        for courseID in self.courseCode.keys():
+        for courseID in self.courseCode:
             self.localFiles[courseID] = self.scanLocalFiles(
                 courseID, self.folders[courseID]
             )
@@ -369,6 +369,6 @@ class CanvasSyncer:
             await self.client.downloadMany(
                 self.downloadDir, self.downloadList, self.downloadSize, self.courseCode
             )
-            print(f"Sync completed!")
+            print("Sync completed!")
 
         return
