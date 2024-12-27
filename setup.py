@@ -41,8 +41,8 @@ setup(
     long_description_content_type="text/markdown",
     author="SJTU JI Tech",
     author_email="bomingzh@sjtu.edu.cn",
-    maintainer={"BoYanZh","Ruizhi Deng"},
-    maintainer_email={"bomingzh@sjtu.edu.cn","ruizhi_deng@sjtu.edu.cn"},
+    maintainer="BoYanZh",
+    maintainer_email="bomingzh@sjtu.edu.cn",,
     packages=find_packages(),
     python_requires=">=3.6",
     entry_points={
