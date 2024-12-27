@@ -42,7 +42,7 @@ setup(
     author="SJTU JI Tech",
     author_email="bomingzh@sjtu.edu.cn",
     maintainer="BoYanZh",
-    maintainer_email="bomingzh@sjtu.edu.cn",,
+    maintainer_email="bomingzh@sjtu.edu.cn",
     packages=find_packages(),
     python_requires=">=3.6",
     entry_points={
