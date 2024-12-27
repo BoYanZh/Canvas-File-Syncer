@@ -53,6 +53,68 @@ class CanvasSyncer:
             page += PAGES_PER_TIME
         return res
 
+    def countFiles(self, filesDict):
+        count = 0
+        for courseID in filesDict.keys():
+            count += len(filesDict[courseID])
+        return count
+
+    async def getCourseID(self):
+        coros = []
+        if self.config.get("courseCodes"):
+            coros.append(self.getCourseIdByCourseCode())
+        if self.config.get("courseIDs"):
+            coros.append(self.getCourseCodeByCourseID())
+        await asyncio.gather(*coros)
+
+    async def getCourseIdByCourseCode(self):
+        lowerCourseCodes = []
+        for courseCode in self.config["courseCodes"]:
+            lowerCourseCodes.append(courseCode.replace(" ", "").lower())
+        self.courseCode.update(
+            await self.dictFromPages(
+                self.getCourseIdByCourseCodeHelper, lowerCourseCodes
+            )
+        )
+
+    async def getCourseIdByCourseCodeHelper(self, page, lowerCourseCodes):
+        res = {}
+        url = f"{self.baseUrl}/courses?page={page}"
+        courses = await self.client.json(
+            url, checkError=True, debug=self.config["debug"]
+        )
+        if not courses:
+            return res
+        for course in courses:
+            if course.get("course_code", "").lower() in lowerCourseCodes:
+                res[course["id"]] = course["course_code"]
+                lowerCourseCodes.remove(course.get("course_code", "").lower())
+                print(
+                    f"\t Get course ID: {course['id']} from course code: {course['course_code']}"
+                )
+            # else:
+            # print(f"\t Discard course code: {course['course_code']}")
+        return res
+
+    async def getCourseCodeByCourseID(self):
+        await asyncio.gather(
+            *[
+                asyncio.create_task(self.getCourseCodeByCourseIDHelper(courseID))
+                for courseID in self.config["courseIDs"]
+            ]
+        )
+
+    async def getCourseCodeByCourseIDHelper(self, courseID):
+        url = f"{self.baseUrl}/courses/{courseID}"
+        clientRes = await self.client.json(url, debug=self.config["debug"])
+        if clientRes.get("course_code") is None:
+            print(f"\t Cannot get course code from course ID: {courseID}")
+            return
+        self.courseCode[int(courseID)] = clientRes["course_code"]
+        print(
+            f"\t Get course code: {clientRes['course_code']} from course ID: {courseID}"
+        )
+
     def scanLocalFiles(self, courseID, folders):
         localFiles = {}
         for folder in folders.values():
@@ -79,6 +141,14 @@ class CanvasSyncer:
                         "modified_time": int(os.path.getctime(full_file_path)),
                     }
         return localFiles
+
+    async def getCourseFiles(self, courseID):
+        self.folders[courseID] = await self.dictFromPages(
+            self.getCourseFoldersWithIDHelper, courseID
+        )
+        self.onlineFiles[courseID] = await self.dictFromPages(
+            self.getCourseFilesHelper, courseID, self.folders[courseID]
+        )
 
     async def getCourseFoldersWithIDHelper(self, page, courseID):
         res = {}
@@ -124,70 +194,6 @@ class CanvasSyncer:
                 "size": file_size,
             }
         return files
-
-    async def getCourseFiles(self, courseID):
-        self.folders[courseID] = await self.dictFromPages(
-            self.getCourseFoldersWithIDHelper, courseID
-        )
-        self.onlineFiles[courseID] = await self.dictFromPages(
-            self.getCourseFilesHelper, courseID, self.folders[courseID]
-        )
-
-    async def getCourseIdByCourseCodeHelper(self, page, lowerCourseCodes):
-        res = {}
-        url = f"{self.baseUrl}/courses?page={page}"
-        courses = await self.client.json(
-            url, checkError=True, debug=self.config["debug"]
-        )
-        if not courses:
-            return res
-        for course in courses:
-            if course.get("course_code", "").lower() in lowerCourseCodes:
-                res[course["id"]] = course["course_code"]
-                lowerCourseCodes.remove(course.get("course_code", "").lower())
-                print(
-                    f"\t Get course ID: {course['id']} from course code: {course['course_code']}"
-                )
-            # else:
-            # print(f"\t Discard course code: {course['course_code']}")
-        return res
-
-    async def getCourseIdByCourseCode(self):
-        lowerCourseCodes = []
-        for courseCode in self.config["courseCodes"]:
-            lowerCourseCodes.append(courseCode.replace(" ", "").lower())
-        self.courseCode.update(
-            await self.dictFromPages(
-                self.getCourseIdByCourseCodeHelper, lowerCourseCodes
-            )
-        )
-
-    async def getCourseCodeByCourseIDHelper(self, courseID):
-        url = f"{self.baseUrl}/courses/{courseID}"
-        clientRes = await self.client.json(url, debug=self.config["debug"])
-        if clientRes.get("course_code") is None:
-            print(f"\t Cannot get course code from course ID: {courseID}")
-            return
-        self.courseCode[int(courseID)] = clientRes["course_code"]
-        print(
-            f"\t Get course code: {clientRes['course_code']} from course ID: {courseID}"
-        )
-
-    async def getCourseCodeByCourseID(self):
-        await asyncio.gather(
-            *[
-                asyncio.create_task(self.getCourseCodeByCourseIDHelper(courseID))
-                for courseID in self.config["courseIDs"]
-            ]
-        )
-
-    async def getCourseID(self):
-        coros = []
-        if self.config.get("courseCodes"):
-            coros.append(self.getCourseIdByCourseCode())
-        if self.config.get("courseIDs"):
-            coros.append(self.getCourseCodeByCourseID())
-        await asyncio.gather(*coros)
 
     def checkNewFiles(self):
         if self.skipFiles:
@@ -250,15 +256,30 @@ class CanvasSyncer:
                 except Exception as e:
                     print(f"\t [{e.__class__.__name__}] Skipped: {abs_file_path}")
 
-    def prepareDownload(self):
-        for courseID in self.newFiles.keys():
-            if courseID not in self.downloadList:
-                self.downloadList[courseID] = {}
-            self.downloadList[courseID].update(self.newFiles[courseID])
-            self.downloadList[courseID].update(self.laterFiles[courseID])
-        for courseID in self.downloadList.keys():
-            for file_name, file_info in self.downloadList[courseID].items():
-                self.downloadSize += file_info["size"]
+    def checkFileType(self):
+        for courseID in self.courseCode.keys():
+            items = list(self.onlineFiles[courseID].items())
+            for file_name, file_info in items:
+                if not self.checkFileTypeHelper(courseID, file_name):
+                    self.onlineFiles[courseID].pop(file_name)
+
+    def checkFileTypeHelper(self, courseID, filename):
+        fileType = (mimetypes.guess_type(filename))[0]
+        if fileType is None:
+            return True
+        if not self.config["allowAudio"]:
+            if fileType.split("/")[0] == "audio":
+                print(f"Audio removed: {self.courseCode[courseID]}{filename} ")
+                return False
+        if not self.config["allowVideo"]:
+            if fileType.split("/")[0] == "video":
+                print(f"Video removed: {self.courseCode[courseID]}{filename} ")
+                return False
+        if not self.config["allowImage"]:
+            if fileType.split("/")[0] == "image":
+                print(f"Image removed: {self.courseCode[courseID]}{filename} ")
+                return False
+        return True
 
     def categorizeFiles(self):
         for courseID in self.courseCode.keys():
@@ -281,37 +302,6 @@ class CanvasSyncer:
                 else:
                     self.newFiles[courseID][file_name] = file_info
 
-    def checkFileTypeHelper(self, courseID, filename):
-        fileType = (mimetypes.guess_type(filename))[0]
-        if fileType is None:
-            return True
-        if not self.config["allowAudio"]:
-            if fileType.split("/")[0] == "audio":
-                print(f"Audio removed: {self.courseCode[courseID]}{filename} ")
-                return False
-        if not self.config["allowVideo"]:
-            if fileType.split("/")[0] == "video":
-                print(f"Video removed: {self.courseCode[courseID]}{filename} ")
-                return False
-        if not self.config["allowImage"]:
-            if fileType.split("/")[0] == "image":
-                print(f"Image removed: {self.courseCode[courseID]}{filename} ")
-                return False
-        return True
-
-    def checkFileType(self):
-        for courseID in self.courseCode.keys():
-            items = list(self.onlineFiles[courseID].items())
-            for file_name, file_info in items:
-                if not self.checkFileTypeHelper(courseID, file_name):
-                    self.onlineFiles[courseID].pop(file_name)
-
-    def countFiles(self, filesDict):
-        count = 0
-        for courseID in filesDict.keys():
-            count += len(filesDict[courseID])
-        return count
-
     def checkFileSize(self):
         for courseID in self.courseCode.keys():
             if courseID not in self.overSizedFiles:
@@ -321,6 +311,16 @@ class CanvasSyncer:
                 if file_info["size"] > self.config["filesizeThresh"] * 1024 * 1024:
                     self.overSizedFiles[courseID][file_name] = file_info
                     self.onlineFiles[courseID].pop(file_name)
+
+    def prepareDownload(self):
+        for courseID in self.newFiles.keys():
+            if courseID not in self.downloadList:
+                self.downloadList[courseID] = {}
+            self.downloadList[courseID].update(self.newFiles[courseID])
+            self.downloadList[courseID].update(self.laterFiles[courseID])
+        for courseID in self.downloadList.keys():
+            for file_name, file_info in self.downloadList[courseID].items():
+                self.downloadSize += file_info["size"]
 
     async def sync(self):
         # Get course IDs
