@@ -32,6 +32,10 @@ class AsyncSemClient:
                                 res.num_bytes_downloaded - num_bytes_downloaded
                             )
                             num_bytes_downloaded = res.num_bytes_downloaded
+                except FileNotFoundError as e:
+                    print("\nFileNotFoundError: Perhaps the file path is too long or invalid. Progress indicator will be inaccurate.")
+                    # os.remove(dst_temp)
+                    return
                 except Exception as e:
                     print(e.__class__.__name__)
                     os.remove(dst_temp)

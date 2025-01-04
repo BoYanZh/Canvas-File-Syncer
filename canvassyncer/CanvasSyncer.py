@@ -115,6 +115,21 @@ class CanvasSyncer:
             f"\t Get course code: {clientRes['course_code']} from course ID: {courseID}"
         )
 
+    # TODO check validity of the func
+    def pathTooLong(self, path, max_length=260):
+        return len(path) > max_length - len(self.downloadDir) - 10
+
+    # TODO check validity of the func
+    def shorten_path(self, path, max_length=260):
+        if not self.pathTooLong(path, max_length):
+            return path
+        base_name = os.path.basename(path)
+        parent_dir = os.path.dirname(path)
+        truncated_parent = parent_dir[:max_length - len(base_name) - 4] + "..."
+        return os.path.join(truncated_parent, base_name)
+
+
+    # TODO fix the issue of too long path, need unify the path
     def scanLocalFiles(self, courseID, folders):
         localFiles = {}
         for folder in folders.values():
@@ -124,8 +139,22 @@ class CanvasSyncer:
                 path = os.path.join(
                     self.downloadDir, f"{self.courseCode[courseID]}{folder}"
                 )
+            if self.pathTooLong(path):
+                print(f"Path too long: {path}")
+                continue
+            # path = self.shorten_path(path)
             if not os.path.exists(path):
-                os.makedirs(path)
+                try:
+                    os.makedirs(path)
+                # except FileNotFoundError as e:
+                    # try:
+                        # path = self.shorten_path(path)
+                        # os.makedirs(path)
+                    # except Exception as e:
+                        # print(f"Error: {e}")
+                except Exception as e:
+                    print(f"Error: {e}")
+                    
 
             for f in os.listdir(path):
                 if not os.path.isdir(os.path.join(path, f)):
@@ -209,11 +238,14 @@ class CanvasSyncer:
                 print(s)
 
     def checkLaterFiles(self):
-        for courseID in self.laterFiles:
-            if self.laterFiles[courseID]:
-                break
-            else:
-                return
+        if not self.laterFiles:
+            return
+        else:
+            for courseID in self.laterFiles:
+                if self.laterFiles[courseID]:
+                    break
+                else:
+                    return
         # if not self.laterFiles:
         #     return
         print("\nThese file(s) have later version on canvas:")
@@ -288,19 +320,22 @@ class CanvasSyncer:
             if courseID not in self.newFiles:
                 self.newFiles[courseID] = {}
             for file_name, file_info in self.onlineFiles[courseID].items():
-                if file_name in self.localFiles[courseID]:
-                    if (
-                        file_info["modified_time"]
-                        > self.localFiles[courseID][file_name]["modified_time"]
-                    ):
-                        self.laterFiles[courseID][file_name] = file_info
-                    else:
-                        pass
-                        # print(
-                        # f"{self.courseCode[courseID]}{file_name} has newer local version. Removed from download list."
-                        # )
-                else:
+                if not self.localFiles[courseID]: 
                     self.newFiles[courseID][file_name] = file_info
+                else:
+                    if file_name in self.localFiles[courseID]:
+                        if (
+                            file_info["modified_time"]
+                            > self.localFiles[courseID][file_name]["modified_time"]
+                        ):
+                            self.laterFiles[courseID][file_name] = file_info
+                        else:
+                            pass
+                            # print(
+                            # f"{self.courseCode[courseID]}{file_name} has newer local version. Removed from download list."
+                            # )
+                    else:
+                        self.newFiles[courseID][file_name] = file_info
 
     def checkFileSize(self):
         for courseID in self.courseCode:
